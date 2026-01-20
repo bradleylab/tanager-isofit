@@ -1,0 +1,192 @@
+# =============================================================================
+# Python
+# =============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# =============================================================================
+# Large Data Files
+# =============================================================================
+
+# HDF5 files
+*.h5
+*.hdf5
+*.hdf
+*.he5
+
+# NetCDF files
+*.nc
+*.nc4
+
+# GeoTIFF / raster files
+*.tif
+*.tiff
+*.geotiff
+
+# =============================================================================
+# ISOFIT / ENVI Outputs
+# =============================================================================
+
+# ENVI binary/header files
+*.img
+*.hdr
+*.bil
+*.bip
+*.bsq
+
+# Output directories
+output/
+outputs/
+isofit_working/
+**/isofit_working/
+
+# Data directories (keep structure but not contents)
+data/test_scenes/
+data/test_output*/
+
+# =============================================================================
+# IDE / Editor Files
+# =============================================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Spyder
+.spyderproject
+.spyproject
+
+# =============================================================================
+# Jupyter
+# =============================================================================
+
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+*.ipynb_checkpoints
+
+# =============================================================================
+# OS Files
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk
+
+# Linux
+*~
+
+# =============================================================================
+# Project-specific
+# =============================================================================
+
+# Serena/MCP
+.serena/
+
+# Spec/planning documents (optional - remove if you want these tracked)
+# spec.md
+# *_plan.md
+tanager_isofit_pipeline_plan.md
+spec.md
+SPEC.md
+test_output*/
+test_isofit_named/
+plans/

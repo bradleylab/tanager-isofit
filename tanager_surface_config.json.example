@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Config for ISOFIT's surface_model command (not used by tanager-isofit directly).",
+    "This builds the .mat file needed for --surface-path.",
+    "",
+    "IMPORTANT: ISOFIT does not expand ~. You must use absolute paths.",
+    "Replace /home/USERNAME below with your actual home directory.",
+    "",
+    "Before using:",
+    "  1. Run: isofit download data",
+    "  2. Replace /home/USERNAME with your home dir (e.g. /home/jane or /Users/jane)",
+    "",
+    "Usage: isofit surface_model this_file.json --wavelength_path wavelengths.txt"
+  ],
+  "output_model_file": "/home/USERNAME/.isofit/tanager_surface.mat",
+  "wavelength_file": null,
+  "normalize": "Euclidean",
+  "reference_windows": [[400, 1250], [1450, 1800], [2050, 2450]],
+  "sources": [
+    {
+      "input_spectrum_files": [
+        "/home/USERNAME/.isofit/data/reflectance/surface_model_ucsb"
+      ],
+      "n_components": 4,
+      "windows": [
+        {"interval": [350, 1330], "regularizer": 1e-6, "correlation": "EM"},
+        {"interval": [1330, 1450], "regularizer": 10, "correlation": "decorrelated"},
+        {"interval": [1450, 1800], "regularizer": 1e-6, "correlation": "EM"},
+        {"interval": [1800, 1950], "regularizer": 10, "correlation": "decorrelated"},
+        {"interval": [1950, 2500], "regularizer": 1e-6, "correlation": "EM"}
+      ],
+      "surface_category": "multicomponent_surface"
+    }
+  ]
+}

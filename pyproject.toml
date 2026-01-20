@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tanager-isofit"
+version = "0.1.0"
+description = "Convert Planet Tanager hyperspectral HDF5 data to surface reflectance using ISOFIT atmospheric correction"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Alex Bradley", email = "alex.bradley@wustl.edu"}
+]
+keywords = [
+    "hyperspectral",
+    "remote-sensing",
+    "atmospheric-correction",
+    "isofit",
+    "tanager",
+    "planet",
+    "envi"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "h5py>=3.0",
+    "numpy>=1.20",
+    "spectral>=0.23",
+    "pvlib>=0.10",
+    "scipy>=1.7",
+    "earthaccess>=0.8",
+    "xarray>=2023.0",
+    "rioxarray>=0.15",
+    "click>=8.0",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+isofit = [
+    "isofit>=3.4.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+all = [
+    "tanager-isofit[isofit,dev]",
+]
+
+[project.scripts]
+tanager-isofit = "tanager_isofit.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/alexkbradley/tanager-isofit"
+Repository = "https://github.com/alexkbradley/tanager-isofit"
+Issues = "https://github.com/alexkbradley/tanager-isofit/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tanager_isofit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["tanager_isofit"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
