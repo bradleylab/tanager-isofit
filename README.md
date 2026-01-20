@@ -2,18 +2,18 @@
 
 Convert Planet Tanager hyperspectral HDF5 data (TOA radiance) to surface reflectance using ISOFIT atmospheric correction.
 
-## Features
+## What it does
 
-- **HDF5 to ENVI Conversion**: Converts Tanager basic radiance HDF5 files to ISOFIT-compatible ENVI format
-- **Pre-computed Geometry**: Uses sun/sensor angles directly from HDF5 metadata when available
-- **sRTMnet Integration**: Uses neural network emulator (no MODTRAN license required)
-- **ISOFIT Integration**: Wrapper for running ISOFIT atmospheric correction with sensible defaults
-- **EMIT Validation**: Tools for comparing results against NASA EMIT L2A surface reflectance
-- **CLI Interface**: Full command-line interface for all operations
+- Converts Tanager HDF5 radiance files to ISOFIT-compatible ENVI format
+- Reads sun/sensor angles directly from HDF5 metadata
+- Runs atmospheric correction via sRTMnet (no MODTRAN license needed)
+- Wraps ISOFIT with defaults tuned for Tanager data
+- Compares results against NASA EMIT L2A for validation
+- Provides a CLI for all operations
 
 ## Installation
 
-### Basic Installation
+### Basic installation
 
 ```bash
 # From PyPI (when available)
@@ -31,25 +31,25 @@ pip install -e .
 pip install -e ".[isofit]"
 ```
 
-### Full Development Installation
+### Development install (all extras)
 
 ```bash
 pip install -e ".[all]"
 ```
 
-## Prerequisites for Full Pipeline
+## Prerequisites
 
-To run the complete atmospheric correction pipeline (not just conversion), you need:
+If you only need HDF5-to-ENVI conversion, skip this section. For atmospheric correction, you'll need:
 
-### 1. ISOFIT Core
+### 1. ISOFIT
 
 ```bash
 pip install isofit>=3.4.0
 ```
 
-### 2. 6S Radiative Transfer Code
+### 2. 6S radiative transfer code
 
-The 6S code is required for sRTMnet to function. Requires a Fortran compiler.
+sRTMnet needs 6S, which requires a Fortran compiler.
 
 ```bash
 # Install gfortran (if not already installed)
@@ -63,7 +63,7 @@ brew install gcc
 isofit download sixs
 ```
 
-### 3. sRTMnet Neural Network Emulator
+### 3. sRTMnet emulator
 
 ```bash
 isofit download srtmnet
@@ -71,9 +71,9 @@ isofit download srtmnet
 
 This downloads the emulator to `~/.isofit/srtmnet/sRTMnet_v120.h5`
 
-### 4. Surface Model
+### 4. Surface model
 
-ISOFIT requires a surface reflectance prior model. You can either:
+ISOFIT needs a surface reflectance prior. Two options:
 
 **Option A: Use an existing model** (if wavelengths match):
 ```bash
@@ -87,24 +87,32 @@ isofit download examples
 # First run conversion to get wavelength file
 tanager-isofit convert input.h5 output/
 
+# Copy and edit the example config
+cp tanager_surface_config.json.example my_surface_config.json
+# Edit my_surface_config.json - replace /home/USERNAME with your actual home dir
+
 # Build surface model
-isofit surface_model surface_config.json \
-  --wavelength_path output/wavelengths.txt \
-  --output_path ~/.isofit/tanager_surface.mat
+isofit surface_model my_surface_config.json \
+  --wavelength_path output/wavelengths.txt
 ```
 
-See the `tanager_surface_config.json` example in this repository.
+Note: ISOFIT doesn't expand `~` in JSON configs, so you must use absolute paths like `/home/jane/.isofit/...` in the config file. See `tanager_surface_config.json.example` for details.
 
-### 5. ISOFIT Data Files
+### 5. ISOFIT data files
 
 ```bash
 isofit download data
 ```
 
-### Verify Installation
+### Verify installation
 
 ```bash
-# Check all components
+# Quick check of all dependencies
+tanager-isofit check-deps
+```
+
+Or manually:
+```bash
 ls ~/.isofit/srtmnet/sRTMnet_v120.h5   # sRTMnet emulator
 ls ~/.isofit/sixs/sixs                  # 6S executable
 ls ~/.isofit/data/                      # Aerosol models, noise files
@@ -207,6 +215,14 @@ Validate ENVI file and print statistics.
 tanager-isofit check output/radiance
 ```
 
+### `tanager-isofit check-deps`
+
+Verify all dependencies (ISOFIT, sRTMnet) are installed.
+
+```bash
+tanager-isofit check-deps
+```
+
 ### `tanager-isofit find-emit`
 
 Search for coincident NASA EMIT data.
@@ -223,11 +239,9 @@ Compare Tanager reflectance against EMIT L2A.
 tanager-isofit validate tanager_refl emit_l2a.nc --output report.html
 ```
 
-## How It Works
+## How it works
 
-The pipeline follows these steps:
-
-### 1. HDF5 to ENVI Conversion
+### 1. HDF5 to ENVI conversion
 
 ```
 Tanager HDF5 → Radiance + Location + Observation (ENVI format)
@@ -238,7 +252,7 @@ Tanager HDF5 → Radiance + Location + Observation (ENVI format)
 - Computes observation geometry (solar/sensor angles, path length)
 - Writes ISOFIT-compatible ENVI files with proper headers
 
-### 2. ISOFIT Atmospheric Correction
+### 2. ISOFIT atmospheric correction
 
 ```
 Radiance + Atmosphere Model → Surface Reflectance
@@ -249,7 +263,7 @@ Radiance + Atmosphere Model → Surface Reflectance
 - Performs optimal estimation inversion per pixel
 - Retrieves surface reflectance and atmospheric state
 
-### 3. Output Products
+### 3. Output products
 
 | File | Description |
 |------|-------------|
@@ -283,9 +297,9 @@ result = run_isofit_pipeline(
 print(result['isofit_outputs']['rfl'])  # Reflectance path
 ```
 
-## Output Files
+## Output files
 
-### Conversion Output
+### Conversion output
 
 | File | Bands | Description |
 |------|-------|-------------|
@@ -294,7 +308,7 @@ print(result['isofit_outputs']['rfl'])  # Reflectance path
 | `obs` | 10 | Observation geometry |
 | `wavelengths.txt` | - | Wavelength table (index, center, FWHM) |
 
-### Observation File Bands
+### Observation file bands
 
 | Band | Name | Units |
 |------|------|-------|
@@ -309,9 +323,9 @@ print(result['isofit_outputs']['rfl'])  # Reflectance path
 | 8 | cosine_i | - |
 | 9 | utc_time | decimal hours |
 
-## Tanager HDF5 Structure
+## Tanager HDF5 structure
 
-The package expects Tanager basic radiance HDF5 files:
+Expected HDF5 layout:
 
 ```
 /HDFEOS/SWATHS/HYP/
@@ -330,20 +344,20 @@ The package expects Tanager basic radiance HDF5 files:
 
 Wavelengths and FWHM are read from `toa_radiance` dataset attributes.
 
-## Known Limitations
+## Limitations
 
-- **Flat terrain assumption**: slope=0, aspect=0 (suitable for water/coastal scenes)
-- **Surface model wavelengths**: Must match Tanager bands (426 channels)
-- **Memory usage**: Large scenes require subsetting or increased RAM
-- **Processing time**: Full scenes can take hours depending on CPU cores
+- Assumes flat terrain (slope=0, aspect=0). Works fine for water and coastal scenes.
+- Surface model wavelengths must match Tanager's 426 bands.
+- Large scenes need lots of RAM. Use `--subset` if you're running out.
+- Full scenes take hours. Grab coffee.
 
-See [ISSUES.md](tanager-isofit-ISSUES.md) for detailed troubleshooting and known issues.
+See [ISSUES.md](tanager-isofit-ISSUES.md) for troubleshooting.
 
-## Test Data
+## Test data
 
-Sample Tanager data from Planet's open data program:
+Sample scene from Planet's open data program:
 
-- **Abu Dhabi Coastal**: `20250511_074311_00_4001_basic_radiance.h5` (558 MB)
+- Abu Dhabi coastal scene: `20250511_074311_00_4001_basic_radiance.h5` (558 MB)
 - URL: https://storage.googleapis.com/open-cogs/planet-stac/release1-basic-radiance/20250511_074311_00_4001_basic_radiance.h5
 
 ## Testing
@@ -356,7 +370,7 @@ pytest tests/ -v
 pytest tests/test_convert.py -v
 ```
 
-## Package Structure
+## Package structure
 
 ```
 tanager_isofit/
