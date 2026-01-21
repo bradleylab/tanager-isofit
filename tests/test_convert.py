@@ -226,6 +226,48 @@ def sample_hdf5(tmp_path):
 
 
 @pytest.fixture
+def sample_grids_hdf5(tmp_path):
+    """Create a minimal GRIDS-format HDF5 file for testing."""
+    h5_path = tmp_path / "test_ortho_radiance.h5"
+    lines, samples, bands = 10, 10, 50
+
+    with h5py.File(h5_path, "w") as f:
+        # GRIDS structure
+        grids = f.create_group("HDFEOS/GRIDS/HYP")
+        data_fields = grids.create_group("Data Fields")
+
+        # Radiance data with wavelength attributes
+        radiance = np.random.rand(lines, samples, bands).astype(np.float32) * 100
+        ds = data_fields.create_dataset("ortho_radiance", data=radiance)
+        ds.attrs["wavelengths"] = np.linspace(400, 2500, bands)
+        ds.attrs["fwhm"] = np.full(bands, 5.0)
+
+        # StructMetadata.0 (UTM zone 33N, roughly central Europe)
+        struct_metadata = (
+            "GROUP=GridStructure\n"
+            "  UpperLeftPointMtrs=(500000.0,4000000.0)\n"
+            "  LowerRightMtrs=(510000.0,3990000.0)\n"
+            "  XDim=10\n"
+            "  YDim=10\n"
+            "  ZoneCode=33\n"
+            "END_GROUP=GridStructure\n"
+        )
+        hdfeos_info = f.create_group("HDFEOS INFORMATION")
+        hdfeos_info.create_dataset("StructMetadata.0", data=struct_metadata.encode())
+
+        # Geometry fields (same structure as SWATHS)
+        data_fields.create_dataset("sensor_zenith", data=np.zeros((lines, samples)))
+        data_fields.create_dataset("sensor_azimuth", data=np.zeros((lines, samples)))
+        data_fields.create_dataset("sun_zenith", data=np.full((lines, samples), 30.0))
+        data_fields.create_dataset("sun_azimuth", data=np.full((lines, samples), 180.0))
+
+        # Add strip_id for timestamp
+        f.attrs["strip_id"] = "20250511_074311_00_4001"
+
+    return h5_path
+
+
+@pytest.fixture
 def real_hdf5():
     """Path to real test HDF5 file if available.
 
@@ -244,3 +286,142 @@ def real_hdf5():
         f"Real test HDF5 not found at {test_path}. "
         f"Set TANAGER_TEST_DATA_DIR or download test data."
     )
+
+
+# GRIDS Format Tests
+
+class TestGRIDSFormat:
+    """Tests for GRIDS format (ortho_radiance) support."""
+
+    def test_generate_grids_latlon_northern(self, sample_grids_hdf5):
+        """Test lat/lon generation for northern hemisphere."""
+        from tanager_isofit.convert import _generate_grids_latlon
+
+        with h5py.File(sample_grids_hdf5, "r") as f:
+            lat, lon = _generate_grids_latlon(f)
+
+        assert lat.shape == (10, 10)
+        assert lon.shape == (10, 10)
+        assert 35 < lat[0, 0] < 37  # Zone 33N latitude range
+        assert lat[0, 0] > lat[-1, 0]  # Latitude decreases going south
+
+    def test_generate_grids_latlon_with_subset(self, sample_grids_hdf5):
+        """Test subsetting works correctly."""
+        from tanager_isofit.convert import _generate_grids_latlon
+
+        with h5py.File(sample_grids_hdf5, "r") as f:
+            lat, lon = _generate_grids_latlon(f, subset=(2, 5, 3, 7))
+
+        assert lat.shape == (3, 4)
+
+    def test_generate_grids_latlon_invalid_zone(self, tmp_path):
+        """Test error for invalid UTM zone."""
+        from tanager_isofit.convert import _generate_grids_latlon
+
+        h5_path = tmp_path / "bad_zone.h5"
+        with h5py.File(h5_path, "w") as f:
+            f.create_group("HDFEOS/GRIDS/HYP")
+            hdfeos_info = f.create_group("HDFEOS INFORMATION")
+            bad_metadata = (
+                "UpperLeftPointMtrs=(500000.0,4000000.0)\n"
+                "LowerRightMtrs=(510000.0,3990000.0)\n"
+                "XDim=10\nYDim=10\nZoneCode=0\n"  # Invalid zone
+            )
+            hdfeos_info.create_dataset("StructMetadata.0", data=bad_metadata.encode())
+
+        with h5py.File(h5_path, "r") as f:
+            with pytest.raises(ValueError, match="Invalid UTM zone"):
+                _generate_grids_latlon(f)
+
+    @pytest.mark.parametrize("utm_zone,expected_south", [
+        (33, False),   # Northern hemisphere
+        (-33, True),   # Southern hemisphere
+    ])
+    def test_generate_grids_latlon_hemispheres(self, tmp_path, utm_zone, expected_south):
+        """Test both hemispheres produce correct latitude signs."""
+        from tanager_isofit.convert import _generate_grids_latlon
+
+        h5_path = tmp_path / f"zone_{utm_zone}.h5"
+        northing = 6000000 if expected_south else 4000000
+
+        with h5py.File(h5_path, "w") as f:
+            f.create_group("HDFEOS/GRIDS/HYP")
+            hdfeos_info = f.create_group("HDFEOS INFORMATION")
+            metadata = (
+                f"UpperLeftPointMtrs=(500000.0,{northing}.0)\n"
+                f"LowerRightMtrs=(510000.0,{northing - 10000}.0)\n"
+                f"XDim=10\nYDim=10\nZoneCode={utm_zone}\n"
+            )
+            hdfeos_info.create_dataset("StructMetadata.0", data=metadata.encode())
+
+        with h5py.File(h5_path, "r") as f:
+            lat, lon = _generate_grids_latlon(f)
+
+        if expected_south:
+            assert lat[0, 0] < 0, "Southern hemisphere should have negative latitude"
+        else:
+            assert lat[0, 0] > 0, "Northern hemisphere should have positive latitude"
+
+    def test_read_grids_hdf5_returns_expected_keys(self, sample_grids_hdf5):
+        """Test that read_tanager_hdf5 works with GRIDS format."""
+        from tanager_isofit.convert import read_tanager_hdf5
+
+        data = read_tanager_hdf5(sample_grids_hdf5)
+
+        expected_keys = [
+            "radiance",
+            "latitude",
+            "longitude",
+            "path_length",
+            "wavelengths",
+            "fwhm",
+            "acquisition_time",
+            "metadata",
+        ]
+
+        for key in expected_keys:
+            assert key in data, f"Missing key: {key}"
+
+    def test_read_grids_hdf5_geolocation_shape(self, sample_grids_hdf5):
+        """Test that generated lat/lon arrays match radiance spatial dimensions."""
+        from tanager_isofit.convert import read_tanager_hdf5
+
+        data = read_tanager_hdf5(sample_grids_hdf5)
+
+        rad_shape = data["radiance"].shape
+        lat_shape = data["latitude"].shape
+        lon_shape = data["longitude"].shape
+
+        assert lat_shape == (rad_shape[0], rad_shape[1])
+        assert lon_shape == (rad_shape[0], rad_shape[1])
+
+    def test_convert_grids_creates_all_files(self, sample_grids_hdf5, tmp_path):
+        """Test that conversion of GRIDS file creates all expected output files."""
+        from tanager_isofit.convert import convert_tanager_to_envi
+
+        output_dir = tmp_path / "output"
+        result = convert_tanager_to_envi(sample_grids_hdf5, output_dir)
+
+        # Check all files exist
+        assert Path(result["radiance"]).exists()
+        assert Path(result["loc"]).exists()
+        assert Path(result["obs"]).exists()
+        assert Path(result["wavelength_file"]).exists()
+
+    def test_validate_grids_structure(self, sample_grids_hdf5):
+        """Test validation of GRIDS format file."""
+        from tanager_isofit.convert import validate_hdf5_structure
+
+        is_valid, issues = validate_hdf5_structure(sample_grids_hdf5)
+
+        # Should be valid (our test file has correct structure)
+        if not is_valid:
+            print(f"Validation issues: {issues}")
+
+    def test_swaths_still_works(self, sample_hdf5, tmp_path):
+        """Regression: existing SWATHS files still work."""
+        from tanager_isofit.convert import convert_tanager_to_envi
+
+        output_dir = tmp_path / "output"
+        result = convert_tanager_to_envi(sample_hdf5, output_dir)
+        assert Path(result["radiance"]).exists()

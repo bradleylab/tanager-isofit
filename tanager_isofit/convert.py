@@ -7,6 +7,8 @@ This module handles:
 - Writing ENVI-format files (radiance, location, observation)
 """
 
+import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List, Union
@@ -14,6 +16,9 @@ import warnings
 
 import h5py
 import numpy as np
+from pyproj import CRS, Transformer
+
+logger = logging.getLogger(__name__)
 
 from tanager_isofit.config import (
     HDF5_RADIANCE_PATH,
@@ -126,6 +131,94 @@ def _get_attribute(obj: Union[h5py.File, h5py.Dataset], names: List[str]) -> Opt
     return None
 
 
+def _generate_grids_latlon(
+    f: h5py.File,
+    subset: Optional[Tuple[int, int, int, int]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Generate lat/lon arrays from GRIDS UTM metadata.
+
+    Args:
+        f: Open h5py.File object (must be GRIDS format)
+        subset: Optional (row_start, row_end, col_start, col_end)
+
+    Returns:
+        (latitude, longitude) arrays in WGS84 (EPSG:4326).
+        Shape is (rows, cols) with row 0 at top (north).
+
+    Raises:
+        ValueError: If StructMetadata.0 is missing or malformed
+    """
+    # Read and decode StructMetadata.0
+    metadata_path = "HDFEOS INFORMATION/StructMetadata.0"
+    if metadata_path not in f:
+        raise ValueError(f"GRIDS file missing {metadata_path}")
+
+    metadata = f[metadata_path][()]
+    if isinstance(metadata, bytes):
+        metadata = metadata.decode("utf-8")
+
+    # Parse required fields
+    ul = re.search(
+        r'UpperLeftPointMtrs=\(\s*([+-]?\d+\.?\d*)\s*,\s*([+-]?\d+\.?\d*)\s*\)',
+        metadata
+    )
+    lr = re.search(
+        r'LowerRightMtrs=\(\s*([+-]?\d+\.?\d*)\s*,\s*([+-]?\d+\.?\d*)\s*\)',
+        metadata
+    )
+    xdim = re.search(r'XDim=(\d+)', metadata)
+    ydim = re.search(r'YDim=(\d+)', metadata)
+    zone = re.search(r'ZoneCode=(-?\d+)', metadata)
+
+    if not all([ul, lr, xdim, ydim, zone]):
+        raise ValueError(
+            "StructMetadata.0 missing required fields "
+            "(UpperLeftPointMtrs, LowerRightMtrs, XDim, YDim, ZoneCode)"
+        )
+
+    # Extract values
+    ul_x, ul_y = float(ul.group(1)), float(ul.group(2))
+    lr_x, lr_y = float(lr.group(1)), float(lr.group(2))
+    cols, rows = int(xdim.group(1)), int(ydim.group(1))
+    utm_zone = int(zone.group(1))
+
+    # Validate UTM zone
+    if utm_zone == 0 or abs(utm_zone) > 60:
+        raise ValueError(f"Invalid UTM zone: {utm_zone}. Must be 1-60 (negative for south)")
+
+    # Generate UTM grid coordinates
+    x_coords = np.linspace(ul_x, lr_x, cols)
+    y_coords = np.linspace(ul_y, lr_y, rows)
+    easting, northing = np.meshgrid(x_coords, y_coords)
+
+    # Determine EPSG code: 326XX for north, 327XX for south
+    epsg = 32600 + utm_zone if utm_zone > 0 else 32700 + abs(utm_zone)
+
+    # Transform UTM -> WGS84
+    transformer = Transformer.from_crs(
+        CRS.from_epsg(epsg),
+        CRS.from_epsg(4326),
+        always_xy=True
+    )
+    longitude, latitude = transformer.transform(easting, northing)
+
+    # Validate output
+    if np.any(np.isnan(latitude)) or np.any(np.isnan(longitude)):
+        raise ValueError(
+            "UTM to lat/lon transformation produced NaN values. "
+            "Check grid parameters and UTM zone."
+        )
+
+    # Apply subset if specified
+    if subset is not None:
+        row_start, row_end, col_start, col_end = subset
+        latitude = latitude[row_start:row_end, col_start:col_end]
+        longitude = longitude[row_start:row_end, col_start:col_end]
+
+    return latitude.astype(np.float64), longitude.astype(np.float64)
+
+
 def read_tanager_hdf5(
     path: Union[str, Path],
     subset: Optional[Tuple[int, int, int, int]] = None,
@@ -215,38 +308,52 @@ def read_tanager_hdf5(
         if bands_first:
             radiance = np.transpose(radiance, (1, 2, 0))
 
-        # Find geolocation datasets
-        latitude_ds = _find_dataset(f, HDF5_ALT_PATHS["latitude"])
-        longitude_ds = _find_dataset(f, HDF5_ALT_PATHS["longitude"])
+        # Get geolocation based on format
+        if "HDFEOS/GRIDS" in f:
+            # GRIDS format: generate lat/lon from UTM metadata
+            logger.info("Detected GRIDS format, generating lat/lon from UTM")
+            latitude, longitude = _generate_grids_latlon(f, subset)
 
-        # If standard paths don't work, search for lat/lon
-        if latitude_ds is None:
-            def find_dataset_by_name(target_name):
-                result = None
-                def visitor(name, obj):
-                    nonlocal result
-                    if result is None and isinstance(obj, h5py.Dataset):
-                        if target_name in name.lower():
-                            result = obj
-                f.visititems(visitor)
-                return result
+        elif "HDFEOS/SWATHS" in f:
+            # SWATHS format: read explicit lat/lon arrays
+            logger.info("Detected SWATHS format, reading explicit lat/lon")
+            latitude_ds = _find_dataset(f, HDF5_ALT_PATHS["latitude"])
+            longitude_ds = _find_dataset(f, HDF5_ALT_PATHS["longitude"])
 
-            latitude_ds = find_dataset_by_name("latitude")
-            longitude_ds = find_dataset_by_name("longitude")
+            # If standard paths don't work, search for lat/lon
+            if latitude_ds is None:
+                def find_dataset_by_name(target_name):
+                    result = None
+                    def visitor(name, obj):
+                        nonlocal result
+                        if result is None and isinstance(obj, h5py.Dataset):
+                            if target_name in name.lower():
+                                result = obj
+                    f.visititems(visitor)
+                    return result
 
-        if latitude_ds is None or longitude_ds is None:
-            raise ValueError(f"Cannot find latitude/longitude datasets in {path}")
+                latitude_ds = find_dataset_by_name("latitude")
+                longitude_ds = find_dataset_by_name("longitude")
 
-        # Read geolocation with same subsetting
-        if subset is not None:
-            latitude = latitude_ds[row_start:row_end, col_start:col_end]
-            longitude = longitude_ds[row_start:row_end, col_start:col_end]
+            if latitude_ds is None or longitude_ds is None:
+                raise ValueError(f"Cannot find latitude/longitude datasets in {path}")
+
+            # Read geolocation with same subsetting
+            if subset is not None:
+                latitude = latitude_ds[row_start:row_end, col_start:col_end]
+                longitude = longitude_ds[row_start:row_end, col_start:col_end]
+            else:
+                latitude = latitude_ds[:]
+                longitude = longitude_ds[:]
+
+            latitude = latitude.astype(np.float64)
+            longitude = longitude.astype(np.float64)
+
         else:
-            latitude = latitude_ds[:]
-            longitude = longitude_ds[:]
-
-        latitude = latitude.astype(np.float64)
-        longitude = longitude.astype(np.float64)
+            raise ValueError(
+                f"Cannot determine HDF5 format for {path}. "
+                "Expected SWATHS (basic_radiance) or GRIDS (ortho_radiance) structure."
+            )
 
         # Find path length dataset
         # NOTE: ISOFIT expects path_length in METERS (it converts to km internally)
@@ -627,6 +734,8 @@ def validate_hdf5_structure(path: Union[str, Path]) -> Tuple[bool, List[str]]:
     """
     Validate that HDF5 file has expected Tanager structure.
 
+    Supports both SWATHS (basic_radiance) and GRIDS (ortho_radiance) formats.
+
     Args:
         path: Path to HDF5 file
 
@@ -641,7 +750,14 @@ def validate_hdf5_structure(path: Union[str, Path]) -> Tuple[bool, List[str]]:
 
     try:
         with h5py.File(path, "r") as f:
-            # Check for radiance
+            # Check for valid format
+            is_swaths = "HDFEOS/SWATHS" in f
+            is_grids = "HDFEOS/GRIDS" in f
+
+            if not is_swaths and not is_grids:
+                return False, ["Cannot determine format: expected SWATHS or GRIDS structure"]
+
+            # Check for radiance (required for both formats)
             radiance_ds = _find_dataset(f, HDF5_ALT_PATHS["radiance"])
             if radiance_ds is None:
                 issues.append("Missing radiance dataset")
@@ -657,15 +773,18 @@ def validate_hdf5_structure(path: Union[str, Path]) -> Tuple[bool, List[str]]:
                     if n_bands != TANAGER_NUM_BANDS:
                         issues.append(f"Expected {TANAGER_NUM_BANDS} bands, got {n_bands}")
 
-            # Check for latitude
-            lat_ds = _find_dataset(f, HDF5_ALT_PATHS["latitude"])
-            if lat_ds is None:
-                issues.append("Missing latitude dataset")
+            # Format-specific checks
+            if is_swaths:
+                lat_ds = _find_dataset(f, HDF5_ALT_PATHS["latitude"])
+                if lat_ds is None:
+                    issues.append("Missing latitude dataset (SWATHS format)")
+                lon_ds = _find_dataset(f, HDF5_ALT_PATHS["longitude"])
+                if lon_ds is None:
+                    issues.append("Missing longitude dataset (SWATHS format)")
 
-            # Check for longitude
-            lon_ds = _find_dataset(f, HDF5_ALT_PATHS["longitude"])
-            if lon_ds is None:
-                issues.append("Missing longitude dataset")
+            if is_grids:
+                if "HDFEOS INFORMATION/StructMetadata.0" not in f:
+                    issues.append("Missing StructMetadata.0 (GRIDS format)")
 
     except Exception as e:
         return False, [f"Error reading HDF5: {e}"]
