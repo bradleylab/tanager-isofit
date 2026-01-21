@@ -159,6 +159,23 @@ DEFAULT_SURFACE_MODEL = "multicomponent_surface"
 # Default location follows ISOFIT conventions
 DEFAULT_SRTMNET_PATH = Path.home() / ".isofit" / "srtmnet" / "sRTMnet_v120.h5"
 
+# Default reflectance library for surface model generation
+DEFAULT_REFLECTANCE_LIBRARY = Path.home() / ".isofit" / "data" / "reflectance" / "surface_model_ucsb"
+
+# Surface model configuration for auto-generation
+SURFACE_MODEL_CONFIG = {
+    "normalize": "Euclidean",
+    "n_components": 4,
+    "reference_windows": [[400, 1250], [1450, 1800], [2050, 2450]],
+    "windows": [
+        {"interval": [350, 1330], "regularizer": 1e-6, "correlation": "EM"},
+        {"interval": [1330, 1450], "regularizer": 10, "correlation": "decorrelated"},
+        {"interval": [1450, 1800], "regularizer": 1e-6, "correlation": "EM"},
+        {"interval": [1800, 1950], "regularizer": 10, "correlation": "decorrelated"},
+        {"interval": [1950, 2500], "regularizer": 1e-6, "correlation": "EM"}
+    ],
+}
+
 # ============================================================================
 # VALIDATION THRESHOLDS
 # ============================================================================

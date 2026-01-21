@@ -11,11 +11,17 @@ __version__ = "0.1.0"
 
 from tanager_isofit.convert import convert_tanager_to_envi
 from tanager_isofit.geometry import calculate_solar_geometry, calculate_sensor_geometry
-from tanager_isofit.isofit_runner import run_isofit_pipeline
+from tanager_isofit.isofit_runner import (
+    run_isofit_pipeline,
+    generate_surface_model,
+    check_isofit_data_available,
+)
 
 __all__ = [
     "convert_tanager_to_envi",
     "calculate_solar_geometry",
     "calculate_sensor_geometry",
     "run_isofit_pipeline",
+    "generate_surface_model",
+    "check_isofit_data_available",
 ]

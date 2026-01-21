@@ -18,6 +18,8 @@ from tanager_isofit.config import (
     ENVI_LOCATION_FILENAME,
     ENVI_OBSERVATION_FILENAME,
     DEFAULT_SRTMNET_PATH,
+    DEFAULT_REFLECTANCE_LIBRARY,
+    SURFACE_MODEL_CONFIG,
 )
 from tanager_isofit.utils import ensure_directory, validate_envi_files
 from tanager_isofit.convert import convert_tanager_to_envi
@@ -49,6 +51,131 @@ def get_available_sensors() -> list:
         return list(configs.keys()) if hasattr(configs, 'keys') else []
     except ImportError:
         return []
+
+
+def check_isofit_data_available() -> Dict[str, Any]:
+    """
+    Check if ISOFIT data files are available.
+
+    Returns:
+        Dictionary with availability status for each data component:
+        - reflectance_library: bool indicating if library exists
+        - reflectance_library_path: Path to library if found, None otherwise
+    """
+    result = {
+        "reflectance_library": False,
+        "reflectance_library_path": None,
+    }
+
+    if DEFAULT_REFLECTANCE_LIBRARY.exists():
+        result["reflectance_library"] = True
+        result["reflectance_library_path"] = DEFAULT_REFLECTANCE_LIBRARY
+
+    return result
+
+
+def generate_surface_model(
+    output_path: Union[str, Path],
+    wavelength_file: Union[str, Path],
+    reflectance_library: Optional[Path] = None,
+) -> Path:
+    """
+    Generate ISOFIT surface model for Tanager wavelengths.
+
+    Uses ISOFIT's surface_model CLI utility to create a surface model
+    based on the sensor's wavelengths and a reflectance library.
+
+    Args:
+        output_path: Path where the surface model (.mat) will be saved
+        wavelength_file: Path to the wavelength file for the sensor
+        reflectance_library: Path to reflectance library directory.
+            If None, uses DEFAULT_REFLECTANCE_LIBRARY.
+
+    Returns:
+        Path to the generated surface model file
+
+    Raises:
+        FileNotFoundError: If reflectance library not found
+        RuntimeError: If surface model generation fails
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    output_path = Path(output_path)
+    wavelength_file = Path(wavelength_file)
+
+    # Check if output already exists (caching)
+    if output_path.exists():
+        print(f"Surface model already exists: {output_path}")
+        return output_path
+
+    # Resolve reflectance library path
+    if reflectance_library is None:
+        reflectance_library = DEFAULT_REFLECTANCE_LIBRARY
+    else:
+        reflectance_library = Path(reflectance_library).expanduser()
+
+    # Validate reflectance library exists
+    if not reflectance_library.exists():
+        raise FileNotFoundError(
+            f"Reflectance library not found: {reflectance_library}\n"
+            "Run 'isofit download data' to install ISOFIT data files."
+        )
+
+    # Build config with absolute paths (ISOFIT doesn't expand ~)
+    config = {
+        "output_model_file": str(output_path.absolute()),
+        "reflectance_library": str(reflectance_library.absolute()),
+        **SURFACE_MODEL_CONFIG,
+    }
+
+    # Write config to temp file
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
+        json.dump(config, f, indent=2)
+        config_path = f.name
+
+    try:
+        print(f"Generating surface model...")
+        print(f"  Wavelength file: {wavelength_file}")
+        print(f"  Reflectance library: {reflectance_library}")
+        print(f"  Output: {output_path}")
+
+        # Run ISOFIT surface_model command
+        result = subprocess.run(
+            [
+                "isofit",
+                "surface_model",
+                config_path,
+                "--wavelength_path",
+                str(wavelength_file.absolute()),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Surface model generation failed:\n"
+                f"stdout: {result.stdout}\n"
+                f"stderr: {result.stderr}"
+            )
+
+        if not output_path.exists():
+            raise RuntimeError(
+                f"Surface model was not created at {output_path}\n"
+                f"stdout: {result.stdout}\n"
+                f"stderr: {result.stderr}"
+            )
+
+        print(f"  Surface model generated successfully")
+        return output_path
+
+    finally:
+        # Clean up temp config file
+        Path(config_path).unlink(missing_ok=True)
 
 
 def run_isofit(
@@ -175,8 +302,28 @@ def run_isofit(
     if wavelength_file is not None:
         oe_args["wavelength_path"] = str(wavelength_file)
 
-    if surface_path is not None:
-        oe_args["surface_path"] = str(surface_path)
+    # Auto-generate surface model if not provided
+    if surface_path is None:
+        if wavelength_file is None:
+            raise ValueError(
+                "wavelength_file is required for auto surface model generation. "
+                "Either provide a wavelength file or specify --surface-path explicitly."
+            )
+
+        isofit_data = check_isofit_data_available()
+        if not isofit_data["reflectance_library"]:
+            raise FileNotFoundError(
+                "Cannot auto-generate surface model: reflectance library not found at "
+                f"{DEFAULT_REFLECTANCE_LIBRARY}\n"
+                "Run 'isofit download data' or provide --surface-path explicitly."
+            )
+
+        surface_path = generate_surface_model(
+            output_path=working_directory / "surface_model.mat",
+            wavelength_file=wavelength_file,
+        )
+
+    oe_args["surface_path"] = str(surface_path)  # Always set now
 
     if resolved_emulator is not None:
         oe_args["emulator_base"] = str(resolved_emulator)

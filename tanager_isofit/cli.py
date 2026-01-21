@@ -112,8 +112,8 @@ def convert(input_h5: str, output_dir: str, subset: Optional[str], fast_solar: b
               help="Only convert, skip ISOFIT processing")
 @click.option("--sensor", type=str, default="tanager",
               help="ISOFIT sensor configuration name")
-@click.option("--surface-path", type=click.Path(exists=True), default=None,
-              help="Path to surface model file (.mat) for ISOFIT")
+@click.option("--surface-path", type=click.Path(), default=None,
+              help="Path to surface model file (.mat). Auto-generates if not provided.")
 @click.option("--emulator-base", type=click.Path(), default="auto",
               help="Path to sRTMnet emulator .h5 file. 'auto' uses default location, 'none' uses MODTRAN")
 def process(
@@ -337,10 +337,10 @@ def check_deps():
     """
     Check if all dependencies are installed.
 
-    Verifies ISOFIT and sRTMnet emulator are available.
+    Verifies ISOFIT, sRTMnet emulator, and reflectance library are available.
     """
-    from tanager_isofit.isofit_runner import check_isofit_available
-    from tanager_isofit.config import DEFAULT_SRTMNET_PATH
+    from tanager_isofit.isofit_runner import check_isofit_available, check_isofit_data_available
+    from tanager_isofit.config import DEFAULT_SRTMNET_PATH, DEFAULT_REFLECTANCE_LIBRARY
 
     all_ok = True
 
@@ -361,6 +361,17 @@ def check_deps():
         click.echo(f"  Expected: {DEFAULT_SRTMNET_PATH}")
         click.echo("  Download with: isofit download --sRTMnet")
         click.echo("  (ISOFIT can fall back to MODTRAN if available)")
+
+    # Check reflectance library for surface model generation
+    isofit_data = check_isofit_data_available()
+    if isofit_data["reflectance_library"]:
+        click.echo(click.style("✓ Reflectance library found", fg="green"))
+        click.echo(f"  Path: {isofit_data['reflectance_library_path']}")
+    else:
+        click.echo(click.style("✗ Reflectance library not found", fg="yellow"))
+        click.echo(f"  Expected: {DEFAULT_REFLECTANCE_LIBRARY}")
+        click.echo("  Download with: isofit download data")
+        click.echo("  (Required for auto-generating surface models)")
 
     if all_ok:
         click.echo(click.style("\nAll dependencies ready!", fg="green"))
